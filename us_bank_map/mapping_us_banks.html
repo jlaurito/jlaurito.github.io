@@ -1,0 +1,326 @@
+<html>
+<meta charset="utf-8">
+<!-- Playing with d3- trying to use topojson to do the following:
+
+    - show a map of US counties
+    - bind county-id to $ deposits, % deposits, and depositer rank
+    - display selected bank(s) data as a choropleth
+    - maybe also display raw data on bank
+    - display data on county in hover
+
+    deposit downloaded from http://www2.fdic.gov/sod/dynaDownload.asp?barItem=6
+    institutions downloaded from http://www2.fdic.gov/idasp/main.asp
+-->
+
+<head>
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-46762740-1', 'jlaurito.github.io');
+  ga('send', 'pageview');
+
+</script>
+
+<style>
+path {
+  fill: #ddd;
+  stroke: #333;
+  stroke-width: .25px;
+}
+path:hover {
+  fill: red;
+}
+body {
+  font: 13px sans-serif;
+}
+ul, table {
+  display: inline-block;
+
+  vertical-align: top;
+}
+ul {
+  padding: 0;
+  list-style-type: none;
+  margin: 0 3em 3ex 0;
+}
+table {
+  border-collapse: collapse;
+}
+li, th, td, text {
+  padding: 0ex 0em;
+  cursor: default;
+  -webkit-user-select: none;
+}
+li {
+  padding: 1ex 1em;
+}
+th, td {
+  color: white;
+  font-size: 10px;
+  text-align: center;
+}
+.selected {
+  background-color: #84a9d7;
+  color: #ff0000;
+}
+
+div#sidebar {
+  float: right;
+  width: 350px;
+  height: 500px; 
+  overflow: auto;
+}
+div#map {
+  float: left;
+}
+.d3-tip {
+  line-height: 1;
+  font-weight: bold;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  border-radius: 2px;
+}
+div#text-container {
+  width: 1000px;
+  margin: 50px;
+  float: left;
+}
+</style>
+
+<title>Mapping the US Banking System with D3.js</title>
+
+</head>
+<h1>Mapping the US Banking System with D3.js</h1>
+<div id="text-container">
+  <p>When I talk about large banks in the US, I often think of them as being vast institutions distributed across the country. And it's true that large banks do business with companies throughout the country. But the heart of a bank, its deposits, show that even the largest banks still retain their regional roots</p>
+  <p>I built this map in order to show the regional homes of each big bank, but I expanded it to show all banks with at least one branch with deposits. As you can see, no bank really covers the whole country, and only a few cover multiple regions. Something to consider when you're thinking of changing banks and want to avoid ATM fees.</p>
+  <p>To build this map, I took data from the <a href="http://www2.fdic.gov/sod/index.asp">FDIC Summary of Deposits</a>, and mapped it using Mike Bostock's <a href="http://d3js.org">D3</a> and <a href="https://github.com/mbostock/topojson/wiki">topojson</a> libraries. For selections, I used (and self-hosted) Johannes Jörg Schmidt's <a href="http://bl.ocks.org/jo/4068610">Selectable.js<a> and for the tooltip used an older version of <a href+"https://github.com/Caged/d3-tip">d3-tip</a>. I cut off the list of banks displayed by the tooltip to the top 10 to keep the visuals manageable.</p>
+  <p>One note on the data: I combined the banks by charter, not by holding company (one corporation may own multiple banks charters, though it isn't especially common). I may re-create this by holding company in the future.</p>
+
+  <p>Click on a bank's name to see where its deposits are.</p>
+
+</div>
+<body id="body">
+<div>
+    <div id="map"></div>
+    <div id="sidebar">
+        <ul id="banks"></ul>
+    </div>
+</div>
+
+<div id="text-container">
+  <br>
+    <p>A few things jumped out at me when I started playing with the data.</p>
+    <p>First, it's clear that <strong>non-consumer brick-and-mortar institutions stand out</strong> and look nothing like regular banks. Credit card companies like Discover and FIA (formerly MBNA) run online banking out of their home counties. Custodian banks like BNYM and State Street (in Boston) hold massive amounts of money, but they do not have traditional consumer-facing branches. The big Wall Street firms that converted to banking companies during the 2008 crisis stand out as well</p>
+    <p>Another thing that stood out to me we that <strong>some areas are particularly deviod of national banks</strong>. Maine and Louisiana do have some large banks there, but generally seem to be more provincial in their banking choices. I don't know if this is driven by regulators or by consumers, but it is noticable.</p>
+    <p>Notice anything else? Drop me a line on <a href="https://twitter.com/joshlaurito">twitter</a> or comment at <a href="">Hacker News</a>.
+</div>
+<script type="text/javascript" src="http://d3js.org/d3.v3.min.js"></script>
+<script type="text/javascript" src="http://d3js.org/topojson.v1.min.js"></script>
+<script type="text/javascript" src="selectable.js"></script>
+<script type="text/javascript" src="d3.tip.min.js"></script>
+
+<script>
+
+var bArray;
+var cArray;
+var cNames;
+var sName;
+var thisBank;
+var rateById = d3.map();
+
+var width = 900,
+    height = 500;
+
+var linear = d3.scale.linear()
+    .domain([0, 100])
+    .range(['#bcbddc','#3f007d']);
+var format = d3.format("0.1f"); 
+
+ var path = d3.geo.path();
+
+var svg = d3.select("#map").append("svg")
+    .attr("width", width)
+    .attr("height", height);
+
+var cData = [];
+
+
+d3.json("data/us-10m.json", writeMap);
+
+
+
+function writeMap(data) {
+    svg.append("g")
+        .attr("class", "counties")
+        .selectAll("path")
+        .data(topojson.feature(data, 
+                               data.objects.counties
+                              ).features
+        )
+        .enter().append("path")
+        .attr("d", path)
+        .on("mousemove", tip.show)
+        .on("mouseout", tip.hide )
+        .on("mouseover", function (d, i) {
+            cData = [];
+            for (var i = 0; i < cArray.length; i++) {            
+                if (cArray[i]['STCNTYBR'] == d.id) {
+                    cData[cArray[i]['county_rank']-1] = cArray[i];
+                }   
+
+                
+            }
+            return toolMove(); 
+        }); 
+        
+    var gradient = svg.append("svg:defs")
+      .append("svg:linearGradient")
+        .attr("id", "gradient")
+        .attr("x1", "0%")
+        .attr("y1", "0%")
+        .attr("x2", "100%")
+        .attr("y2", "0%")
+        .attr("spreadMethod", "pad");
+
+    gradient.append("svg:stop")
+        .attr("offset", "0%")
+        .attr("stop-color", "#bcbddc")
+        .attr("stop-opacity", 1);
+
+    gradient.append("svg:stop")
+        .attr("offset", "100%")
+        .attr("stop-color", "#3f007d")
+        .attr("stop-opacity", 1);
+
+    svg.append("text")
+        .attr("x", 500)
+        .attr("y", 450)
+        .style("font-size", "14px")
+        .style("font-weight", "bold")
+        .style("fill", "#333")
+        .text("% of deposits held by bank");
+
+    svg.append("text")
+        .attr("x", 498)
+        .attr("y", 472)
+        .style("font-size", "12px")
+        .style("font-weight", "bold")
+        .style("fill", "#333")
+        .text("0%");
+
+    svg.append("text")
+        .attr("x", 670)
+        .attr("y", 472)
+        .style("font-size", "12px")
+        .style("font-weight", "bold")
+        .style("fill", "#333")
+        .text("100%");
+
+    svg.append("svg:rect")
+        .attr("x", 520)
+        .attr("y", 460)
+        .attr("width", 150)
+        .attr("height", 15)
+        .style("fill", "url(#gradient)");
+
+
+};
+
+function commaFormat(x) {
+    return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+d3.csv("data/summary_stats.csv", function (data) {cArray = data;});
+
+d3.csv("data/counties.csv", function(data) {cNames = data;});
+
+var tip = d3.tip()
+    .attr('class', 'd3-tip')
+    .offset([-10,0])
+    .html(function(d){
+        var listOut = '';
+        var cntyNum;
+        var cntyName;
+        var bankName;
+        for (var i = 0; i < Math.min(cData.length,10); i++) {
+            if(cData[i] != undefined){
+                cntyNum = cData[i]['STCNTYBR'];
+                for (var k = 0; k < bArray.length; k++) {
+                    if (bArray[k]["FED_RSSD"] == cData[i]['RSSDID']) {
+                        bankName = bArray[k]['NAME'];
+                        break;
+                    };
+                };
+                listOut = listOut + '<tr><th>' + cData[i]['county_rank'] + '</th><th>' + bankName + '</th><th>' + commaFormat(cData[i]['DEPSUMBR']) + '</th><th>' + cData[i]['perc_deposits'] + '</th></tr>';
+            };
+        };
+        for (var j = 0; j < cNames.length; j++) {
+            if (+cNames[j]['FIPS'] == cntyNum) {
+                cntyName = cNames[j]['County Name'] + ' ' + cNames[j]['State'];
+                sName = cNames[j]['State']
+                break;
+            };
+        };
+        return "<strong>" + cntyName + "</strong><br> <table><tr><td>Rank </td><td>Bank </td><td>Deposits($000)</td><td>% of Deposits</td><td></tr>" + listOut + '</table>';
+    })
+    .direction(function(){
+        if (sName == "CA" || sName == "OR" || sName == "WA" || sName == "AK" || sName == "UT" || sName == "AZ" || sName == "NM" || sName == "ID" || sName == "MT "|| sName == "WY") {return "ne";} else {return "nw";};
+    });
+
+function toolMove() {
+    return svg.call(tip);
+};
+
+d3.json("data/banks.json", writeMenu);
+
+function writeMenu(data){
+
+    bArray = data;
+
+    var ul = d3.select('#banks');
+
+    var li = ul.selectAll('li')
+        .data(bArray)
+      .enter()
+        .append('li')
+        .classed('selected', function(d) { return d._selected; })
+        .text(function(d) { return d.NAME + ' $' + commaFormat(Math.round(d.DEPDOM/1000)) +' MM deposits'; });
+
+
+
+    function update(d) {
+        ul.selectAll('li')
+            .classed('selected', function(d) { return d._selected; });
+
+        li.on("click", function(d) { 
+            rateById = d3.map();
+            thisBank = d;
+            for (var i = 0; i < cArray.length; i++) {
+                if (cArray[i]['RSSDID'] == thisBank['FED_RSSD']) {
+                    rateById.set(cArray[i]['STCNTYBR'], 
+                                 +cArray[i]['perc_deposits']
+                                 );
+                };
+            };
+
+            svg.selectAll("path")
+                .style("fill", function(data) { 
+                    if(!isNaN(rateById.get(data.id))) {
+                        return linear(rateById.get(data.id));
+                    } else { return "#ddd";} 
+            });
+        });
+    };
+
+    d3.selectable(ul, li, update);
+};
+
+</script>
+
+</body>
+<html>
