@@ -1,0 +1,47 @@
+.node {
+    cursor: pointer;
+}
+
+.overlay{
+    background-color:#EEE;
+}
+
+.node rect {
+    fill: #bbb;
+    opacity: 0.7;
+}
+
+.node text {
+    font-size:12px; 
+    font-family:sans-serif;
+}
+.node .smalltext {
+    font-size:9px; 
+    font-family:sans-serif;
+    fill:#888;
+}
+.node .faketext {
+    font-size:9px; 
+    font-family:sans-serif;
+    fill:#800;
+}
+
+.link {
+    fill: none;
+    stroke: silver;
+    stroke-width: 0.5px;
+}
+
+.templink {
+    fill: none;
+    stroke: red;
+    stroke-width: 3px;
+}
+
+.ghostCircle.show{
+    display:block;
+}
+
+.ghostCircle, .activeDrag .ghostCircle{
+     display: none;
+}
